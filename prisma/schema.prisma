@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  COACH
+  ADMIN
+}
+enum FitnessGoal {
+  BUILD_MUSCLE
+  LOSE_FAT
+  BUILD_STRENGTH
+  GENERAL_FITNESS
+}
+enum ExperienceLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+enum Equipment {
+  DUMBBELL
+  BARBELL
+  BENCH
+  RACK
+  MACHINE
+  CABLE
+  PULL_UP_BAR
+  KETTLEBELL
+  RESISTANCE_BAND
+}
+enum MuscleGroup {
+  CHEST
+  BACK
+  SHOULDERS
+  QUADRICEPS
+  HAMSTRINGS
+  GLUTES
+  CALVES
+  BICEPS
+  TRICEPS
+  CORE
+  FULL_BODY
+}
+enum MovementPattern {
+  HORIZONTAL_PUSH
+  VERTICAL_PUSH
+  HORIZONTAL_PULL
+  VERTICAL_PULL
+  SQUAT
+  HINGE
+  LUNGE
+  ISOLATION
+  CORE
+  CARRY
+}
+enum TrackingType {
+  REPS_WEIGHT
+  REPS_ONLY
+  DURATION
+  DISTANCE_WEIGHT
+}
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+enum WorkoutStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+enum CoachRelationshipStatus {
+  PENDING
+  ACTIVE
+  DECLINED
+  REVOKED
+}
+
+model User {
+  id String @id @default(cuid())
+  name String?
+  email String @unique
+  emailVerified DateTime?
+  image String?
+  passwordHash String?
+  role Role @default(USER)
+  isDemo Boolean @default(false)
+  createdAt DateTime @default(now())
+  profile Profile?
+  plans Plan[]
+  workouts WorkoutSession[]
+  weights BodyWeightEntry[]
+  accounts Account[]
+  sessions Session[]
+  coachedClients CoachClient[] @relation("CoachToClient")
+  coachingRequests CoachClient[] @relation("ClientToCoach")
+  assignedPlans CoachPlanAssignment[] @relation("CoachAssignedPlans")
+  receivedPlans CoachPlanAssignment[] @relation("ClientReceivedPlans")
+}
+model Account {
+  userId String
+  type String
+  provider String
+  providerAccountId String
+  refresh_token String? @db.Text
+  access_token String? @db.Text
+  expires_at Int?
+  token_type String?
+  scope String?
+  id_token String? @db.Text
+  session_state String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([provider, providerAccountId])
+}
+model Session {
+  sessionToken String @unique
+  userId String
+  expires DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model VerificationToken {
+  identifier String
+  token String
+  expires DateTime
+  @@id([identifier, token])
+}
+model Profile {
+  id String @id @default(cuid())
+  userId String @unique
+  heightCm Decimal? @db.Decimal(5, 2)
+  weightKg Decimal? @db.Decimal(6, 2)
+  goal FitnessGoal @default(GENERAL_FITNESS)
+  level ExperienceLevel @default(BEGINNER)
+  daysPerWeek Int @default(3)
+  equipment Equipment[] @default([])
+  limitations String[] @default([])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model Exercise {
+  id String @id @default(cuid())
+  slug String @unique
+  name String
+  muscle MuscleGroup
+  pattern MovementPattern
+  equipment Equipment[] @default([])
+  difficulty ExperienceLevel @default(BEGINNER)
+  trackingType TrackingType @default(REPS_WEIGHT)
+  instructions String?
+  steps String[] @default([])
+  commonMistakes String[] @default([])
+  videoUrl String?
+  isActive Boolean @default(true)
+  planExercises PlanExercise[]
+  setLogs SetLog[]
+}
+model Plan {
+  id String @id @default(cuid())
+  userId String
+  name String
+  description String?
+  goal FitnessGoal @default(GENERAL_FITNESS)
+  status PlanStatus @default(DRAFT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  days PlanDay[]
+  coachAssignment CoachPlanAssignment?
+  @@index([userId, status])
+}
+model PlanDay {
+  id String @id @default(cuid())
+  planId String
+  dayNumber Int
+  name String
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  exercises PlanExercise[]
+  workouts WorkoutSession[]
+  @@unique([planId, dayNumber])
+}
+model PlanExercise {
+  id String @id @default(cuid())
+  planDayId String
+  exerciseId String
+  sortOrder Int
+  targetSets Int @default(3)
+  targetRepsMin Int?
+  targetRepsMax Int?
+  targetWeightKg Decimal? @db.Decimal(7, 2)
+  targetDurationSeconds Int?
+  targetDistanceMeters Decimal? @db.Decimal(9, 2)
+  restSeconds Int @default(90)
+  planDay PlanDay @relation(fields: [planDayId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id])
+  setLogs SetLog[]
+  @@unique([planDayId, sortOrder])
+  @@unique([planDayId, exerciseId])
+}
+model WorkoutSession {
+  id String @id @default(cuid())
+  userId String
+  planDayId String?
+  status WorkoutStatus @default(IN_PROGRESS)
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  notes String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planDay PlanDay? @relation(fields: [planDayId], references: [id], onDelete: SetNull)
+  setLogs SetLog[]
+  @@index([userId, status])
+  @@index([userId, completedAt])
+}
+model SetLog {
+  id String @id @default(cuid())
+  sessionId String
+  exerciseId String
+  planExerciseId String?
+  setNumber Int
+  reps Int?
+  weightKg Decimal? @db.Decimal(7, 2)
+  durationSeconds Int?
+  distanceMeters Decimal? @db.Decimal(9, 2)
+  rpe Decimal? @db.Decimal(3, 1)
+  isWarmup Boolean @default(false)
+  loggedAt DateTime @default(now())
+  session WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id])
+  planExercise PlanExercise? @relation(fields: [planExerciseId], references: [id], onDelete: SetNull)
+  @@unique([sessionId, exerciseId, setNumber])
+  @@index([exerciseId, sessionId])
+}
+model BodyWeightEntry {
+  id String @id @default(cuid())
+  userId String
+  weightKg Decimal @db.Decimal(6, 2)
+  recordedOn DateTime @db.Date
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, recordedOn])
+}
+model CoachClient {
+  id String @id @default(cuid())
+  coachId String
+  clientId String
+  status CoachRelationshipStatus @default(PENDING)
+  shareBodyWeight Boolean @default(false)
+  createdAt DateTime @default(now())
+  coach User @relation("CoachToClient", fields: [coachId], references: [id], onDelete: Cascade)
+  client User @relation("ClientToCoach", fields: [clientId], references: [id], onDelete: Cascade)
+  @@unique([coachId, clientId])
+}
+model CoachPlanAssignment {
+  id String @id @default(cuid())
+  coachId String
+  clientId String
+  planId String @unique
+  sourcePlanId String
+  createdAt DateTime @default(now())
+  coach User @relation("CoachAssignedPlans", fields: [coachId], references: [id], onDelete: Cascade)
+  client User @relation("ClientReceivedPlans", fields: [clientId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  @@index([coachId, clientId])
+}
