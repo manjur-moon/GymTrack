@@ -1,11 +1,865 @@
+
 "use client";
-import {useEffect,useState} from "react";import {useRouter} from "next/navigation";import type {LoggedSet} from "@/lib/workouts";import {queueSet,listQueued,syncQueue,discardConflict,type QueuedSet} from "@/lib/offline-queue";import {NaturalLog} from "@/components/natural-log";
-export type ExerciseItem={id:string;exerciseId:string;name:string;trackingType:string;targetSets:number;targetRepsMin:number|null;targetRepsMax:number|null;targetWeightKg:number|null;targetDurationSeconds:number|null;targetDistanceMeters:number|null;restSeconds:number;suggestion?:string};
-type Props={userId:string;sessionId:string;dayName:string;exercises:ExerciseItem[];initialSets:LoggedSet[];previousSets:LoggedSet[]};
-export function WorkoutLogger({userId,sessionId,dayName,exercises,initialSets,previousSets}:Props){const router=useRouter();const [logs,setLogs]=useState(initialSets),[queued,setQueued]=useState<QueuedSet[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[deadline,setDeadline]=useState(0),[tick,setTick]=useState(Date.now());const [fields,setFields]=useState<Record<string,{reps:string;weightKg:string;durationSeconds:string;distanceMeters:string}>>(()=>Object.fromEntries(exercises.map(e=>{const past=previousSets.find(s=>s.exerciseId===e.exerciseId);return [e.exerciseId,{reps:String(past?.reps??e.targetRepsMin??8),weightKg:String(past?.weightKg??e.targetWeightKg??""),durationSeconds:String(past?.durationSeconds??e.targetDurationSeconds??30),distanceMeters:String(past?.distanceMeters??e.targetDistanceMeters??20)}]})));
-const queueRefresh=async()=>setQueued((await listQueued(userId,sessionId)));useEffect(()=>{void queueRefresh();const k=`gymtrack-rest:${sessionId}`;const value=Number(localStorage.getItem(k)??0);if(value>Date.now())setDeadline(value);const interval=setInterval(()=>setTick(Date.now()),1000);return()=>clearInterval(interval)},[sessionId,userId]);async function sync(){await syncQueue(userId,sessionId);await queueRefresh();router.refresh()}useEffect(()=>{const cb=()=>{void sync()};window.addEventListener("online",cb);navigator.serviceWorker?.addEventListener("message",cb);return()=>{window.removeEventListener("online",cb);navigator.serviceWorker?.removeEventListener("message",cb)}},[sessionId,userId]);
-function next(id:string){return 1+Math.max(0,...logs.filter(x=>x.exerciseId===id).map(x=>x.setNumber),...queued.filter(x=>x.data.exerciseId===id&&x.state!=="conflict").map(x=>x.data.setNumber))}
-function applyPatch(id:string,key:string,value:string){setFields(p=>({...p,[id]:{...p[id],[key]:value}}))}
-async function log(e:ExerciseItem){setError("");const f=fields[e.exerciseId];const data:{exerciseId:string;setNumber:number;reps?:number;weightKg?:number;durationSeconds?:number;distanceMeters?:number;isWarmup:boolean}={exerciseId:e.exerciseId,setNumber:next(e.exerciseId),isWarmup:false};if(e.trackingType.includes("REPS")){data.reps=Number(f.reps);if(e.trackingType==="REPS_WEIGHT"&&f.weightKg) data.weightKg=Number(f.weightKg);}if(e.trackingType==="DURATION")data.durationSeconds=Number(f.durationSeconds);if(e.trackingType==="DISTANCE_WEIGHT"){data.distanceMeters=Number(f.distanceMeters);if(f.weightKg)data.weightKg=Number(f.weightKg)}if(data.reps!==undefined&&(!Number.isInteger(data.reps)||data.reps<1)){setError("Enter valid reps");return;}setBusy(true);try{await queueSet(userId,sessionId,data);await queueRefresh();await syncQueue(userId,sessionId);await queueRefresh();const r=await fetch(`/api/workouts/${sessionId}/offline-state`,{cache:"no-store"});if(r.ok){const j=await r.json();setLogs(j.sets);}const end=Date.now()+e.restSeconds*1000;localStorage.setItem(`gymtrack-rest:${sessionId}`,String(end));setDeadline(end)}catch{setError("Stored locally if browser storage is available. Sync when online.");}finally{setBusy(false)}}
-async function finish(){if(queued.length){setError("Resolve or synchronize all queued sets before finishing.");return;}if(!window.confirm("Finish this workout?"))return;setBusy(true);const r=await fetch(`/api/workouts/${sessionId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"complete"})});const j=await r.json();setBusy(false);if(!r.ok)setError(j.error);else{router.push("/workouts/history");router.refresh()}}
-const remaining=Math.max(0,Math.ceil((deadline-tick)/1000));return <div className="stack"><section className="card between"><div><p className="eyebrow">In progress</p><h1>{dayName}</h1><p className="sub">{logs.length} sets saved · {queued.length} queued</p></div><div className="panel"><p className="sub">Rest timer</p><p className="stat">{String(Math.floor(remaining/60)).padStart(2,"0")}:{String(remaining%60).padStart(2,"0")}</p><button className="btn ghost" onClick={()=>{setDeadline(0);localStorage.removeItem(`gymtrack-rest:${sessionId}`)}}>Skip</button></div></section>{error?<p className="error" role="alert">{error}</p>:null}{queued.length?<div className="warn stack"><h3>Offline queue · {queued.length} sets</h3>{queued.map(q=><p className="small" key={q.id}>{q.data.exerciseId} · Set {q.data.setNumber} — {q.state}{q.state==="conflict"?" (server conflict — confirm discarding if already logged)":""}{q.state==="conflict"?<button className="btn ghost" onClick={async()=>{if(confirm("Discard this unsynced local set? This cannot be undone.")){await discardConflict(q.id);await queueRefresh()}}}>Discard local conflict</button>:null}</p>)}<button className="btn secondary" onClick={sync}>Sync pending sets</button></div>:null}<NaturalLog sessionId={sessionId} exercises={exercises} initialSets={logs} onSaved={(sets)=>{setLogs(old=>[...old,...sets.filter(s=>!old.some(x=>x.id===s.id))]);router.refresh()}}/>{exercises.map(e=>{const done=logs.filter(s=>s.exerciseId===e.exerciseId).sort((a,b)=>a.setNumber-b.setNumber);const f=fields[e.exerciseId];return <section className="card stack" key={e.id}><div className="between"><div><h2>{e.name}</h2><p className="sub">{e.targetSets} sets planned · {e.restSeconds}s rest</p></div><span className="badge">{done.length} saved</span></div>{e.suggestion?<p className="success"><strong>Training suggestion:</strong> {e.suggestion}</p>:null}{done.map(s=><div className="panel between" key={s.id}><span>Set {s.setNumber} · {s.reps??s.durationSeconds??s.distanceMeters}{s.reps?" reps":s.durationSeconds?" sec":" m"}{s.weightKg!==undefined?` · ${s.weightKg} kg`:""}</span><button className="btn ghost" onClick={async()=>{const r=await fetch(`/api/workouts/${sessionId}/sets/${s.id}`,{method:"DELETE"});if(r.ok){setLogs(x=>x.filter(z=>z.id!==s.id));router.refresh();}else setError("Cannot undo this set")}}>Undo</button></div>)}<div className="grid three">{e.trackingType.includes("REPS")?<label className="field">Reps<input className="input" aria-label={`Reps for ${e.name}`} type="number" min={1} value={f.reps} onChange={x=>applyPatch(e.exerciseId,"reps",x.target.value)}/></label>:null}{["REPS_WEIGHT","DISTANCE_WEIGHT"].includes(e.trackingType)?<label className="field">Weight (kg)<input className="input" aria-label={`Weight for ${e.name}`} type="number" min={0} step="0.5" value={f.weightKg} onChange={x=>applyPatch(e.exerciseId,"weightKg",x.target.value)}/></label>:null}{e.trackingType==="DURATION"?<label className="field">Seconds<input className="input" type="number" value={f.durationSeconds} onChange={x=>applyPatch(e.exerciseId,"durationSeconds",x.target.value)}/></label>:null}{e.trackingType==="DISTANCE_WEIGHT"?<label className="field">Distance (m)<input className="input" type="number" value={f.distanceMeters} onChange={x=>applyPatch(e.exerciseId,"distanceMeters",x.target.value)}/></label>:null}</div><button className="btn" disabled={busy} onClick={()=>log(e)}>✓ Log set {next(e.exerciseId)}</button></section>})}<section className="card stack"><h2>Finish session</h2><p className="sub">Offline sets must synchronize before the workout can be completed.</p><button disabled={busy||logs.length===0||queued.length>0} className="btn" onClick={finish}>Finish workout</button></section></div>}
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useRouter } from "next/navigation";
+
+import {
+  logSetSchema,
+  type LoggedSet,
+} from "@/lib/workouts";
+
+import {
+  queueSet,
+  listQueued,
+  syncQueue,
+  discardConflict,
+  type QueuedSet,
+} from "@/lib/offline-queue";
+
+import { NaturalLog } from "@/components/natural-log";
+
+export type ExerciseItem = {
+  id: string;
+  exerciseId: string;
+  name: string;
+  trackingType: string;
+  targetSets: number;
+  targetRepsMin: number | null;
+  targetRepsMax: number | null;
+  targetWeightKg: number | null;
+  targetDurationSeconds: number | null;
+  targetDistanceMeters: number | null;
+  restSeconds: number;
+  suggestion?: string;
+};
+
+type Props = {
+  userId: string;
+  sessionId: string;
+  dayName: string;
+  exercises: ExerciseItem[];
+  initialSets: LoggedSet[];
+  previousSets: LoggedSet[];
+};
+
+type InputFields = {
+  reps: string;
+  weightKg: string;
+  durationSeconds: string;
+  distanceMeters: string;
+};
+
+export function WorkoutLogger({
+  userId,
+  sessionId,
+  dayName,
+  exercises,
+  initialSets,
+  previousSets,
+}: Props) {
+  const router = useRouter();
+  const syncInFlight = useRef(false);
+
+  const [logs, setLogs] = useState<LoggedSet[]>(initialSets);
+  const [queued, setQueued] = useState<QueuedSet[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [deadline, setDeadline] = useState(0);
+  const [tick, setTick] = useState(0);
+
+  const [fields, setFields] = useState<
+    Record<string, InputFields>
+  >(() =>
+    Object.fromEntries(
+      exercises.map((exercise) => {
+        const past = previousSets.find(
+          (set) =>
+            set.exerciseId === exercise.exerciseId
+        );
+
+        return [
+          exercise.exerciseId,
+          {
+            reps: String(
+              past?.reps ??
+                exercise.targetRepsMin ??
+                8
+            ),
+            weightKg: String(
+              past?.weightKg ??
+                exercise.targetWeightKg ??
+                ""
+            ),
+            durationSeconds: String(
+              past?.durationSeconds ??
+                exercise.targetDurationSeconds ??
+                30
+            ),
+            distanceMeters: String(
+              past?.distanceMeters ??
+                exercise.targetDistanceMeters ??
+                20
+            ),
+          },
+        ];
+      })
+    )
+  );
+
+  // Refresh sets stored in IndexedDB.
+  const queueRefresh = useCallback(async () => {
+    const items = await listQueued(userId, sessionId);
+    setQueued(items);
+    return items;
+  }, [userId, sessionId]);
+
+  // Refresh server-confirmed workout sets.
+  const refreshSavedSets = useCallback(async () => {
+    const response = await fetch(
+      `/api/workouts/${sessionId}/offline-state`,
+      {
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) return;
+
+    const result = (await response.json()) as {
+      sets: LoggedSet[];
+    };
+
+    setLogs(result.sets);
+  }, [sessionId]);
+
+  // Initialize offline state and restore the rest timer.
+  useEffect(() => {
+    let active = true;
+
+    void listQueued(userId, sessionId)
+      .then((items) => {
+        if (active) setQueued(items);
+      })
+      .catch(() => {
+        // Browser storage may be unavailable.
+      });
+
+    const restKey = `gymtrack-rest:${sessionId}`;
+
+    const initialClock = window.setTimeout(() => {
+      try {
+        const saved = Number(
+          window.localStorage.getItem(restKey) ?? 0
+        );
+
+        if (saved > Date.now()) {
+          setDeadline(saved);
+        }
+      } catch {
+        // Local storage is optional for the timer.
+      }
+
+      setTick(Date.now());
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      setTick(Date.now());
+    }, 1000);
+
+    return () => {
+      active = false;
+      window.clearTimeout(initialClock);
+      window.clearInterval(interval);
+    };
+  }, [userId, sessionId]);
+
+  // Retry locally queued sets.
+  const sync = useCallback(async () => {
+    if (syncInFlight.current) return;
+
+    syncInFlight.current = true;
+
+    try {
+      await syncQueue(userId, sessionId);
+      await queueRefresh();
+      await refreshSavedSets();
+      router.refresh();
+    } catch {
+      setError(
+        "Could not synchronize. Your pending sets remain stored locally."
+      );
+    } finally {
+      syncInFlight.current = false;
+    }
+  }, [
+    userId,
+    sessionId,
+    queueRefresh,
+    refreshSavedSets,
+    router,
+  ]);
+
+  // Retry when connectivity returns or the service worker requests it.
+  useEffect(() => {
+    const handleReconnect = () => {
+      void sync();
+    };
+
+    const handleWorkerMessage = (
+      event: MessageEvent
+    ) => {
+      if (event.data?.type === "GYMTRACK_SYNC") {
+        void sync();
+      }
+    };
+
+    window.addEventListener(
+      "online",
+      handleReconnect
+    );
+
+    navigator.serviceWorker?.addEventListener(
+      "message",
+      handleWorkerMessage
+    );
+
+    const initialSync = window.setTimeout(() => {
+      if (navigator.onLine) {
+        void sync();
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(initialSync);
+
+      window.removeEventListener(
+        "online",
+        handleReconnect
+      );
+
+      navigator.serviceWorker?.removeEventListener(
+        "message",
+        handleWorkerMessage
+      );
+    };
+  }, [sync]);
+
+  // Calculate the next set number.
+  function nextSetNumber(exerciseId: string) {
+    return (
+      1 +
+      Math.max(
+        0,
+        ...logs
+          .filter(
+            (set) => set.exerciseId === exerciseId
+          )
+          .map((set) => set.setNumber),
+        ...queued
+          .filter(
+            (item) =>
+              item.data.exerciseId === exerciseId
+          )
+          .map((item) => item.data.setNumber)
+      )
+    );
+  }
+
+  // Update controlled exercise inputs.
+  function updateField(
+    exerciseId: string,
+    field: keyof InputFields,
+    value: string
+  ) {
+    setFields((previous) => ({
+      ...previous,
+      [exerciseId]: {
+        ...previous[exerciseId],
+        [field]: value,
+      },
+    }));
+  }
+
+  // Save a workout set.
+  async function logSet(exercise: ExerciseItem) {
+    if (busy) return;
+
+    setError("");
+
+    const input = fields[exercise.exerciseId];
+    if (!input) return;
+
+    const payload: {
+      exerciseId: string;
+      setNumber: number;
+      reps?: number;
+      weightKg?: number;
+      durationSeconds?: number;
+      distanceMeters?: number;
+      isWarmup: boolean;
+    } = {
+      exerciseId: exercise.exerciseId,
+      setNumber: nextSetNumber(exercise.exerciseId),
+      isWarmup: false,
+    };
+
+    if (exercise.trackingType.includes("REPS")) {
+      payload.reps = Number(input.reps);
+    }
+
+    if (
+      exercise.trackingType === "REPS_WEIGHT" &&
+      input.weightKg !== ""
+    ) {
+      payload.weightKg = Number(input.weightKg);
+    }
+
+    if (exercise.trackingType === "DURATION") {
+      payload.durationSeconds = Number(
+        input.durationSeconds
+      );
+    }
+
+    if (
+      exercise.trackingType === "DISTANCE_WEIGHT"
+    ) {
+      payload.distanceMeters = Number(
+        input.distanceMeters
+      );
+
+      if (input.weightKg !== "") {
+        payload.weightKg = Number(input.weightKg);
+      }
+    }
+
+    // Apply the existing server validation rules.
+    const parsed = logSetSchema.safeParse(payload);
+
+    if (!parsed.success) {
+      setError(
+        parsed.error.issues[0]?.message ??
+          "Invalid set values."
+      );
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      // Persist the set locally first.
+      await queueSet(
+        userId,
+        sessionId,
+        parsed.data
+      );
+
+      await queueRefresh();
+
+      // Start the rest timer.
+      const end =
+        Date.now() +
+        exercise.restSeconds * 1000;
+
+      try {
+        window.localStorage.setItem(
+          `gymtrack-rest:${sessionId}`,
+          String(end)
+        );
+      } catch {
+        // Timer continues for the current page.
+      }
+
+      setDeadline(end);
+      setTick(Date.now());
+
+      // Attempt to synchronize.
+      await sync();
+    } catch {
+      setError(
+        "Could not save this set locally. Check browser storage permissions."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Undo an existing saved set.
+  async function undoSet(setId: string) {
+    if (busy || queued.length) return;
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `/api/workouts/${sessionId}/sets/${setId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Cannot undo this set.");
+      }
+
+      setLogs((previous) =>
+        previous.filter((set) => set.id !== setId)
+      );
+
+      router.refresh();
+    } catch {
+      setError(
+        "Cannot undo this set. Please try again."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Complete workout session.
+  async function finishWorkout() {
+    if (busy) return;
+
+    setError("");
+
+    try {
+      const pending = await queueRefresh();
+
+      if (pending.length > 0) {
+        setError(
+          "Resolve or synchronize all queued sets before finishing."
+        );
+        return;
+      }
+    } catch {
+      setError(
+        "Could not verify offline sets. Retry when storage is available."
+      );
+      return;
+    }
+
+    if (!window.confirm("Finish this workout?")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch(
+        `/api/workouts/${sessionId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "complete",
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const result = (await response
+          .json()
+          .catch(() => ({}))) as {
+          error?: string;
+        };
+
+        throw new Error(
+          result.error ?? "Could not finish workout."
+        );
+      }
+
+      router.push("/workouts/history");
+      router.refresh();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not finish workout."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const remaining = Math.max(
+    0,
+    Math.ceil((deadline - tick) / 1000)
+  );
+
+  return (
+    <div className="stack">
+      {/* Workout header */}
+      <section className="card between">
+        <div>
+          <p className="eyebrow">In progress</p>
+          <h1>{dayName}</h1>
+
+          <p className="sub" aria-live="polite">
+            {logs.length} sets saved ·{" "}
+            {queued.length} queued
+          </p>
+        </div>
+
+        <div className="panel">
+          <p className="sub">Rest timer</p>
+
+          <p className="stat">
+            {String(
+              Math.floor(remaining / 60)
+            ).padStart(2, "0")}
+            :
+            {String(remaining % 60).padStart(
+              2,
+              "0"
+            )}
+          </p>
+
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => {
+              setDeadline(0);
+
+              try {
+                window.localStorage.removeItem(
+                  `gymtrack-rest:${sessionId}`
+                );
+              } catch {
+                // Storage may be blocked.
+              }
+            }}
+          >
+            Skip
+          </button>
+        </div>
+      </section>
+
+      {/* Error message */}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {/* Offline queue */}
+      {queued.length > 0 && (
+        <section
+          className="warn stack"
+          aria-label="Offline queue"
+        >
+          <h3>
+            Offline queue · {queued.length} sets
+          </h3>
+
+          {queued.map((item) => (
+            <div
+              className="panel between"
+              key={item.id}
+            >
+              <span className="small">
+                {exercises.find(
+                  (e) =>
+                    e.exerciseId ===
+                    item.data.exerciseId
+                )?.name ?? "Exercise"}{" "}
+                · Set {item.data.setNumber} —{" "}
+                {item.state}
+              </span>
+
+              {item.state === "conflict" && (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      window.confirm(
+                        "Discard this unsynced local set? This cannot be undone."
+                      )
+                    ) {
+                      await discardConflict(
+                        item.id
+                      );
+
+                      await queueRefresh();
+                    }
+                  }}
+                >
+                  Discard conflict
+                </button>
+              )}
+            </div>
+          ))}
+
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy}
+            onClick={() => void sync()}
+          >
+            Sync pending sets
+          </button>
+        </section>
+      )}
+
+      {/* Natural language logging */}
+      {queued.length === 0 ? (
+        <NaturalLog
+          sessionId={sessionId}
+          exercises={exercises}
+          initialSets={logs}
+          onSaved={(sets) => {
+            setLogs((previous) => [
+              ...previous,
+              ...sets.filter(
+                (set) =>
+                  !previous.some(
+                    (old) => old.id === set.id
+                  )
+              ),
+            ]);
+
+            router.refresh();
+          }}
+        />
+      ) : (
+        <p className="sub">
+          AI-assisted bulk logging is disabled
+          until pending sets synchronize.
+        </p>
+      )}
+
+      {/* Exercise list */}
+      {exercises.map((exercise) => {
+        const done = logs
+          .filter(
+            (set) =>
+              set.exerciseId ===
+              exercise.exerciseId
+          )
+          .sort(
+            (a, b) =>
+              a.setNumber - b.setNumber
+          );
+
+        const input =
+          fields[exercise.exerciseId];
+
+        if (!input) return null;
+
+        return (
+          <section
+            className="card stack"
+            key={exercise.id}
+          >
+            <div className="between">
+              <div>
+                <h2>{exercise.name}</h2>
+
+                <p className="sub">
+                  {exercise.targetSets} sets
+                  planned ·{" "}
+                  {exercise.restSeconds}s
+                  rest
+                </p>
+              </div>
+
+              <span className="badge">
+                {done.length} saved
+              </span>
+            </div>
+
+            {/* Training suggestion */}
+            {exercise.suggestion && (
+              <p className="success">
+                <strong>
+                  Training suggestion:
+                </strong>{" "}
+                {exercise.suggestion}
+              </p>
+            )}
+
+            {/* Saved sets */}
+            {done.map((set) => (
+              <div
+                className="panel between"
+                key={set.id}
+              >
+                <span>
+                  Set {set.setNumber} ·{" "}
+                  {set.reps ??
+                    set.durationSeconds ??
+                    set.distanceMeters}
+                  {set.reps !== undefined
+                    ? " reps"
+                    : set.durationSeconds !==
+                        undefined
+                      ? " sec"
+                      : " m"}
+                  {set.weightKg !== undefined
+                    ? ` · ${set.weightKg} kg`
+                    : ""}
+                </span>
+
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={
+                    busy || queued.length > 0
+                  }
+                  onClick={() =>
+                    void undoSet(set.id)
+                  }
+                >
+                  Undo
+                </button>
+              </div>
+            ))}
+
+            {/* Exercise input fields */}
+            <div className="grid three">
+              {exercise.trackingType.includes(
+                "REPS"
+              ) && (
+                <label className="field">
+                  Reps
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    aria-label={`Reps for ${exercise.name}`}
+                    value={input.reps}
+                    onChange={(event) =>
+                      updateField(
+                        exercise.exerciseId,
+                        "reps",
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+              )}
+
+              {[
+                "REPS_WEIGHT",
+                "DISTANCE_WEIGHT",
+              ].includes(
+                exercise.trackingType
+              ) && (
+                <label className="field">
+                  Weight (kg)
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    aria-label={`Weight for ${exercise.name}`}
+                    value={input.weightKg}
+                    onChange={(event) =>
+                      updateField(
+                        exercise.exerciseId,
+                        "weightKg",
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+              )}
+
+              {exercise.trackingType ===
+                "DURATION" && (
+                <label className="field">
+                  Seconds
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={
+                      input.durationSeconds
+                    }
+                    onChange={(event) =>
+                      updateField(
+                        exercise.exerciseId,
+                        "durationSeconds",
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+              )}
+
+              {exercise.trackingType ===
+                "DISTANCE_WEIGHT" && (
+                <label className="field">
+                  Distance (m)
+                  <input
+                    className="input"
+                    type="number"
+                    min={0.01}
+                    step="any"
+                    value={
+                      input.distanceMeters
+                    }
+                    onChange={(event) =>
+                      updateField(
+                        exercise.exerciseId,
+                        "distanceMeters",
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={() =>
+                void logSet(exercise)
+              }
+            >
+              ✓ Log set{" "}
+              {nextSetNumber(
+                exercise.exerciseId
+              )}
+            </button>
+          </section>
+        );
+      })}
+
+      {/* Finish workout */}
+      <section className="card stack">
+        <h2>Finish session</h2>
+
+        <p className="sub">
+          Offline sets must synchronize
+          before the workout can be completed.
+        </p>
+
+        <button
+          type="button"
+          className="btn"
+          disabled={
+            busy ||
+            logs.length === 0 ||
+            queued.length > 0
+          }
+          onClick={() =>
+            void finishWorkout()
+          }
+        >
+          Finish workout
+        </button>
+      </section>
+    </div>
+  );
+}

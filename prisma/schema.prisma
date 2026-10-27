@@ -82,6 +82,21 @@ enum CoachRelationshipStatus {
   REVOKED
 }
 
+enum ProgramTemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+enum ProgramAssignmentStatus {
+  ACTIVE
+  REPLACED
+  REVOKED
+}
+enum ScheduledWorkoutStatus {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
+
 model User {
   id String @id @default(cuid())
   name String?
@@ -102,6 +117,9 @@ model User {
   coachingRequests CoachClient[] @relation("ClientToCoach")
   assignedPlans CoachPlanAssignment[] @relation("CoachAssignedPlans")
   receivedPlans CoachPlanAssignment[] @relation("ClientReceivedPlans")
+  programTemplates ProgramTemplate[] @relation("ProgramCreator")
+  programsAssigned ProgramAssignment[] @relation("ProgramsAssignedByCoach")
+  programsReceived ProgramAssignment[] @relation("ProgramsAssignedToClient")
 }
 model Account {
   userId String
@@ -171,6 +189,7 @@ model Plan {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   days PlanDay[]
   coachAssignment CoachPlanAssignment?
+  programAssignment ProgramAssignment?
   @@index([userId, status])
 }
 model PlanDay {
@@ -181,6 +200,7 @@ model PlanDay {
   plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
   exercises PlanExercise[]
   workouts WorkoutSession[]
+  scheduledWorkouts ScheduledWorkout[]
   @@unique([planId, dayNumber])
 }
 model PlanExercise {
@@ -212,6 +232,7 @@ model WorkoutSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   planDay PlanDay? @relation(fields: [planDayId], references: [id], onDelete: SetNull)
   setLogs SetLog[]
+  scheduledWorkout ScheduledWorkout?
   @@index([userId, status])
   @@index([userId, completedAt])
 }
@@ -265,4 +286,67 @@ model CoachPlanAssignment {
   client User @relation("ClientReceivedPlans", fields: [clientId], references: [id], onDelete: Cascade)
   plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
   @@index([coachId, clientId])
+}
+
+// R3: Published versions are immutable snapshots of source Plan data.
+// Keep Plan/CoachPlanAssignment for backwards-compatible workout history.
+model ProgramTemplate {
+  id String @id @default(cuid())
+  coachId String
+  name String
+  goal FitnessGoal
+  status ProgramTemplateStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  coach User @relation("ProgramCreator", fields: [coachId], references: [id], onDelete: Cascade)
+  versions ProgramVersion[]
+  @@index([coachId, status])
+}
+
+model ProgramVersion {
+  id String @id @default(cuid())
+  templateId String
+  version Int
+  // Immutable plan name, goal, days and prescribed exercises.
+  snapshot Json
+  createdAt DateTime @default(now())
+  template ProgramTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  assignments ProgramAssignment[]
+  @@unique([templateId, version])
+}
+
+model ProgramAssignment {
+  id String @id @default(cuid())
+  coachId String
+  clientId String
+  versionId String
+  planId String @unique
+  startDate DateTime @db.Date
+  endDate DateTime @db.Date
+  weekdays Int[] @default([])
+  status ProgramAssignmentStatus @default(ACTIVE)
+  idempotencyKey String
+  createdAt DateTime @default(now())
+  coach User @relation("ProgramsAssignedByCoach", fields: [coachId], references: [id], onDelete: Cascade)
+  client User @relation("ProgramsAssignedToClient", fields: [clientId], references: [id], onDelete: Cascade)
+  version ProgramVersion @relation(fields: [versionId], references: [id])
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  scheduledWorkouts ScheduledWorkout[]
+  @@unique([coachId, idempotencyKey])
+  @@index([clientId, status])
+  @@index([coachId, clientId, createdAt])
+}
+
+model ScheduledWorkout {
+  id String @id @default(cuid())
+  assignmentId String
+  planDayId String
+  scheduledFor DateTime @db.Date
+  status ScheduledWorkoutStatus @default(PLANNED)
+  sessionId String? @unique
+  assignment ProgramAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  planDay PlanDay @relation(fields: [planDayId], references: [id], onDelete: Cascade)
+  session WorkoutSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  @@unique([assignmentId, planDayId, scheduledFor])
+  @@index([planDayId, scheduledFor, status])
 }
