@@ -1,0 +1,2 @@
+import {requireUser} from "@/server/auth";import {redirect} from "next/navigation";import {CoachForm} from "@/components/coach-actions";
+export default async function Page(){const u=await requireUser();if(u.role!=="ADMIN")redirect("/dashboard");return <div className="container stack"><h1>Admin · Coaches</h1><CoachForm endpoint="/api/admin/coaches" label="Promote user to coach" fields={[{name:"email",placeholder:"Registered user email"}]}/></div>}
