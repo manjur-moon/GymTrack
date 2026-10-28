@@ -1,3 +1,84 @@
-"use client";import {useState} from "react";import {useRouter} from "next/navigation";
-export function StartWorkout({planDayId,sourceSessionId,label="Start workout"}:{planDayId?:string;sourceSessionId?:string;label?:string}){const [busy,setBusy]=useState(false),[error,setError]=useState("");const router=useRouter();async function act(){setBusy(true);setError("");try{const r=await fetch("/api/workouts/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(sourceSessionId?{mode:"repeat",sourceSessionId}:{mode:"plan-day",planDayId})});const j=await r.json();if(r.status===409&&j.sessionId){router.push(`/workouts/${j.sessionId}`);return;}if(!r.ok)throw new Error(j.error);router.push(`/workouts/${j.id}${j.repeatFrom?`?repeatFrom=${j.repeatFrom}`:""}`);router.refresh();}catch(e){setError(e instanceof Error?e.message:"Could not start") }finally{setBusy(false)}}return <div className="stack"><button className="btn" disabled={busy} onClick={act}>{busy?"Opening...":label} →</button>{error?<p role="alert" className="error">{error}</p>:null}</div>}
-export function ActivatePlan({id}:{id:string}){const [error,setError]=useState("");const router=useRouter();return <div><button className="btn secondary" onClick={async()=>{const r=await fetch(`/api/plans/${id}/activate`,{method:"POST"});if(r.ok)router.refresh();else setError((await r.json()).error)}}>Activate plan</button>{error?<p role="alert" className="error">{error}</p>:null}</div>}
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+export function StartWorkout({
+  planDayId,
+  sourceSessionId,
+  label = "Start workout",
+  scheduledWorkoutId,
+}: {
+  planDayId?: string;
+  sourceSessionId?: string;
+  label?: string;
+  scheduledWorkoutId?: string;
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const router = useRouter();
+  async function act() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/workouts/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sourceSessionId
+            ? { mode: "repeat", sourceSessionId }
+            : { mode: "plan-day", planDayId, scheduledWorkoutId },
+        ),
+      });
+      const j = await r.json();
+      if (r.status === 409 && j.sessionId) {
+        router.push(`/workouts/${j.sessionId}`);
+        return;
+      }
+      if (!r.ok) throw new Error(j.error);
+      router.push(
+        `/workouts/${j.id}${j.repeatFrom ? `?repeatFrom=${j.repeatFrom}` : ""}`,
+      );
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="stack">
+      <button className="btn" disabled={busy} onClick={act}>
+        {busy ? "Opening..." : label} →
+      </button>
+      {error ? (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+export function ActivatePlan({ id }: { id: string }) {
+  const [error, setError] = useState("");
+  const router = useRouter();
+  return (
+    <div>
+      <button
+        className="btn secondary"
+        onClick={async () => {
+          const r = await fetch(`/api/plans/${id}/activate`, {
+            method: "POST",
+          });
+          if (r.ok) router.refresh();
+          else setError((await r.json()).error);
+        }}
+      >
+        Activate plan
+      </button>
+      {error ? (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}

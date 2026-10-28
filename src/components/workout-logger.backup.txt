@@ -1,0 +1,124 @@
+{index + 1}
+                </span>
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-extrabold text-[#14263d]">{exercise.name}</h3>
+                  <p className="text-sm text-[#536477]">
+                    {exercise.targetSets} sets · {exercise.restSeconds}s rest
+                    {exercise.targetRepsMin != null && ` · ${exercise.targetRepsMin}${exercise.targetRepsMax != null ? `–${exercise.targetRepsMax}` : ""} reps`}
+                  </p>
+                </div>
+              </div>
+              <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${exerciseComplete ? "bg-[#e5f5f0] text-[#0e8074]" : "bg-[#eef2f7] text-[#536477]"}`}>
+                {exerciseComplete ? <><Check size={14} className="mr-1 inline" aria-hidden="true" /> Target reached</> : `${done.length}/${exercise.targetSets} saved`}
+              </span>
+            </div>
+
+            {past.length > 0 && (
+              <div className="rounded-xl bg-[#f5f8fb] px-4 py-3 text-sm text-[#4b6074]">
+                <span className="font-semibold">Last session: </span>
+                {setDescription(past[past.length - 1])}
+              </div>
+            )}
+
+            {exercise.suggestion && (
+              <p className="success"><strong>Suggestion:</strong> {exercise.suggestion}</p>
+            )}
+
+            {done.length > 0 && (
+              <div className="grid gap-2" aria-label={`Saved sets for ${exercise.name}`}>
+                {done.map((set) => (
+                  <div key={set.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e6ecef] bg-[#fbfcfd] px-3 py-2.5">
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="grid h-7 w-7 place-items-center rounded-full bg-[#e5f5f0] text-[#0e8074]"><Check size={15} aria-hidden="true" /></span>
+                      <span><strong className="text-[#14263d]">Set {set.setNumber}</strong> <span className="text-[#536477]">· {setDescription(set)}</span></span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={disabled || queued.length > 0}
+                      className="text-xs font-bold text-[#536477] hover:text-[#b6404a] disabled:opacity-50"
+                      onClick={() => void undoSet(set.id)}
+                      aria-label={`Undo ${exercise.name} set ${set.setNumber}`}
+                    >
+                      Undo
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {exercise.trackingType.includes("REPS") && (
+                <label className="field">Reps
+                  <input className="input" type="number" min={1} max={1000} value={input.reps}
+                    onChange={(event) => updateField(exercise.exerciseId, "reps", event.target.value)}
+                    aria-label={`Reps for ${exercise.name}`} />
+                </label>
+              )}
+              {["REPS_WEIGHT", "DISTANCE_WEIGHT"].includes(exercise.trackingType) && (
+                <label className="field">Weight (kg)
+                  <input className="input" type="number" min={0} max={2000} step="0.5" value={input.weightKg}
+                    onChange={(event) => updateField(exercise.exerciseId, "weightKg", event.target.value)}
+                    aria-label={`Weight for ${exercise.name}`} />
+                </label>
+              )}
+              {exercise.trackingType === "DURATION" && (
+                <label className="field">Seconds
+                  <input className="input" type="number" min={1} max={36000} value={input.durationSeconds}
+                    onChange={(event) => updateField(exercise.exerciseId, "durationSeconds", event.target.value)}
+                    aria-label={`Seconds for ${exercise.name}`} />
+                </label>
+              )}
+              {exercise.trackingType === "DISTANCE_WEIGHT" && (
+                <label className="field">Distance (m)
+                  <input className="input" type="number" min={0.01} max={100000} step="any" value={input.distanceMeters}
+                    onChange={(event) => updateField(exercise.exerciseId, "distanceMeters", event.target.value)}
+                    aria-label={`Distance for ${exercise.name}`} />
+                </label>
+              )}
+            </div>
+
+            <button type="button" className="btn w-full sm:w-auto" disabled={disabled}
+              onClick={() => void logSet(exercise)}>
+              <Dumbbell size={17} aria-hidden="true" /> Log set {nextSetNumber(exercise.exerciseId)}
+            </button>
+          </section>
+        );
+      })}
+
+      {queued.length === 0 ? (
+        <NaturalLog
+          sessionId={sessionId}
+          exercises={exercises}
+          initialSets={logs}
+          onSaved={(sets) => {
+            setLogs((current) => [
+              ...current,
+              ...sets.filter((set) => !current.some((existing) => existing.id === set.id)),
+            ]);
+            router.refresh();
+          }}
+        />
+      ) : (
+        <p className="text-sm text-[#536477]">AI-assisted logging is unavailable until your pending sets are synced.</p>
+      )}
+
+      <section className="grid gap-4 rounded-2xl border border-[#d7e8e2] bg-[#edf8f3] p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#0e8074]"><CheckCircle2 size={23} aria-hidden="true" /></div>
+          <div>
+            <h2 className="text-xl font-extrabold text-[#14263d]">Finish your workout</h2>
+            <p className="mt-1 text-sm text-[#536477]">Finish after all pending sets have synchronized. Your completed workout will appear in history.</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn w-full"
+          disabled={disabled || logs.length === 0 || queued.length > 0}
+          onClick={() => void finishWorkout()}
+        >
+          <CheckCircle2 size={18} aria-hidden="true" /> Finish workout
+        </button>
+      </section>
+    </div>
+  );
+}

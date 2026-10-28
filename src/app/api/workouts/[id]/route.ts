@@ -1,3 +1,64 @@
-import {NextResponse} from "next/server";import {z} from "zod";import {currentUser} from "@/server/auth";import {prisma} from "@/server/db";
-const schema=z.object({action:z.enum(["complete","cancel"])});
-export async function PATCH(req:Request,{params}:{params:Promise<{id:string}>}){const u=await currentUser();if(!u)return NextResponse.json({error:"Unauthorized"},{status:401});if(u.isDemo)return NextResponse.json({error:"Read-only demo"},{status:403});const {id}=await params;const input=schema.safeParse(await req.json().catch(()=>null));if(!input.success)return NextResponse.json({error:"Invalid action"},{status:400});try{const result=await prisma.$transaction(async tx=>{await tx.$queryRaw`SELECT id FROM "WorkoutSession" WHERE id=${id} AND "userId"=${u.id} FOR UPDATE`;const session=await tx.workoutSession.findFirst({where:{id,userId:u.id},select:{status:true,_count:{select:{setLogs:true}}}});if(!session)return "MISSING";if(session.status!=="IN_PROGRESS")return "CLOSED";if(input.data.action==="complete"&&!session._count.setLogs)return "EMPTY";if(input.data.action==="cancel"&&session._count.setLogs)return "HAS_SETS";await tx.workoutSession.update({where:{id},data:{status:input.data.action==="complete"?"COMPLETED":"CANCELLED",completedAt:input.data.action==="complete"?new Date():null}});return "OK"});return result==="OK"?NextResponse.json({success:true}):NextResponse.json({error:result},{status:result==="MISSING"?404:409});}catch{return NextResponse.json({error:"Could not update session"},{status:500})}}
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { currentUser } from "@/server/auth";
+import { prisma } from "@/server/db";
+const schema = z.object({ action: z.enum(["complete", "cancel"]) });
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await currentUser();
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (user.isDemo)
+    return NextResponse.json({ error: "Read-only demo" }, { status: 403 });
+  const { id } = await params;
+  const parsed = schema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success)
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WorkoutSession" WHERE id=${id} AND "userId"=${user.id} FOR UPDATE`;
+      const session = await tx.workoutSession.findFirst({
+        where: { id, userId: user.id },
+        select: { status: true, _count: { select: { setLogs: true } } },
+      });
+      if (!session) return "MISSING";
+      if (session.status !== "IN_PROGRESS") return "CLOSED";
+      if (parsed.data.action === "complete" && !session._count.setLogs)
+        return "EMPTY";
+      if (parsed.data.action === "cancel" && session._count.setLogs)
+        return "HAS_SETS";
+      await tx.workoutSession.update({
+        where: { id },
+        data: {
+          status: parsed.data.action === "complete" ? "COMPLETED" : "CANCELLED",
+          completedAt: parsed.data.action === "complete" ? new Date() : null,
+        },
+      });
+      if (parsed.data.action === "complete") {
+        await tx.scheduledWorkout.updateMany({
+          where: { sessionId: id, status: "PLANNED" },
+          data: { status: "COMPLETED" },
+        });
+      } else {
+        await tx.scheduledWorkout.updateMany({
+          where: { sessionId: id, status: "PLANNED" },
+          data: { sessionId: null },
+        });
+      }
+      return "OK";
+    });
+    return result === "OK"
+      ? NextResponse.json({ success: true })
+      : NextResponse.json(
+          { error: result },
+          { status: result === "MISSING" ? 404 : 409 },
+        );
+  } catch {
+    return NextResponse.json(
+      { error: "Could not update session" },
+      { status: 500 },
+    );
+  }
+}
