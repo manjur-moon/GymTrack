@@ -1,0 +1,340 @@
+import Link from "next/link";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  CalendarCheck2,
+  ClipboardList,
+  Clock3,
+  TrendingUp,
+  UserRoundCheck,
+  Users,
+} from "lucide-react";
+
+import { getCoachOverviewData } from "@/server/coach-analytics";
+
+function formatShortUTCDate(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
+function formatLastWorkout(value: string | null): string {
+  if (!value) return "No completed workouts";
+
+  return `Last workout: ${new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value))} (UTC)`;
+}
+
+export default async function CoachOverview() {
+  // The service performs the coach role check and scopes every query
+  // to this coach's currently approved client relationships.
+  const { metrics, attentionClients, weeklyActivity } =
+    await getCoachOverviewData();
+
+  const maxScheduled = Math.max(
+    1,
+    ...weeklyActivity.map((day) => day.scheduledSessions),
+  );
+
+  return (
+    <div className="container stack coach-overview">
+      <header className="page-heading between">
+        <div className="stack tight">
+          <p className="eyebrow">COACH WORKSPACE / INSIGHTS</p>
+          <h1>Coaching overview</h1>
+          <p className="muted">
+            Monitor assigned training, spot missed sessions, and support your
+            approved clients.
+          </p>
+        </div>
+
+        <div className="row">
+          <Link className="btn" href="/coach/clients">
+            Manage clients <ArrowRight size={16} aria-hidden />
+          </Link>
+          <Link className="btn secondary" href="/coach/assignments">
+            View assignments
+          </Link>
+        </div>
+      </header>
+
+      <section className="grid four metrics-grid" aria-label="Coaching metrics">
+        <div className="metric-card">
+          <div className="metric-icon">
+            <Users size={20} aria-hidden />
+          </div>
+          <p className="sub">Active clients</p>
+          <p className="stat">{metrics.activeClients}</p>
+          <span className="metric-note">Approved coaching relationships</span>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon">
+            <ClipboardList size={20} aria-hidden />
+          </div>
+          <p className="sub">Active assignments</p>
+          <p className="stat">{metrics.activeAssignments}</p>
+          <span className="metric-note">Current R3 programs</span>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon">
+            <TrendingUp size={20} aria-hidden />
+          </div>
+          <p className="sub">Scheduled adherence</p>
+          <p className="stat">
+            {metrics.adherencePercent === null
+              ? "—"
+              : `${metrics.adherencePercent}%`}
+          </p>
+          <span className="metric-note">
+            {metrics.scheduledDueThisWeek === 0
+              ? "No sessions due this UTC week"
+              : `${metrics.scheduledCompletedThisWeek} of ${metrics.scheduledDueThisWeek} sessions due this UTC week`}
+          </span>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-icon">
+            <AlertTriangle size={20} aria-hidden />
+          </div>
+          <p className="sub">Overdue sessions</p>
+          <p className="stat">{metrics.overdueScheduledSessions}</p>
+          <span className="metric-note">
+            Past-due scheduled workouts not in progress
+          </span>
+        </div>
+      </section>
+
+      <section className="panel between" aria-label="Additional coaching activity">
+        <div className="row">
+          <CalendarCheck2 size={20} aria-hidden />
+          <div className="stack tight">
+            <strong>
+              {metrics.completedAssignedSessionsLast7Days} assigned workouts
+              completed
+            </strong>
+            <span className="sub">In the last 7 rolling days</span>
+          </div>
+        </div>
+        <div className="row">
+          <UserRoundCheck size={20} aria-hidden />
+          <div className="stack tight">
+            <strong>{metrics.pendingInvitations} pending invitations</strong>
+            <span className="sub">Awaiting client acceptance</span>
+          </div>
+          <Link className="text-link" href="/coach/clients">
+            Review <ArrowRight size={15} aria-hidden />
+          </Link>
+        </div>
+      </section>
+
+      <div className="grid two">
+        <section className="card stack" aria-labelledby="weekly-activity-title">
+          <div className="between">
+            <div className="stack tight">
+              <p className="eyebrow">SCHEDULED TRAINING</p>
+              <h2 id="weekly-activity-title">Last 7 calendar days</h2>
+              <p className="sub">
+                Completed versus scheduled sessions, grouped by scheduled UTC
+                date.
+              </p>
+            </div>
+            <Activity size={23} aria-hidden />
+          </div>
+
+          <div className="stack" style={{ gap: 13 }}>
+            {weeklyActivity.map((day) => {
+              const scheduledWidth =
+                (day.scheduledSessions / maxScheduled) * 100;
+              const completedWidth = day.scheduledSessions
+                ? (day.completedSessions / day.scheduledSessions) * 100
+                : 0;
+
+              return (
+                <div
+                  key={day.date}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "40px minmax(0, 1fr) 64px",
+                    gap: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <span className="sub" title={day.date}>
+                    {formatShortUTCDate(day.date)}
+                  </span>
+                  <div
+                    role="img"
+                    aria-label={`${day.date}: ${day.completedSessions} completed of ${day.scheduledSessions} scheduled sessions`}
+                    style={{
+                      height: 11,
+                      borderRadius: 999,
+                      overflow: "hidden",
+                      background: "var(--surface-subtle)",
+                      border: "1px solid var(--line)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${scheduledWidth}%`,
+                        height: "100%",
+                        borderRadius: 999,
+                        background: "var(--accent-soft)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${completedWidth}%`,
+                          height: "100%",
+                          borderRadius: 999,
+                          background: "var(--accent)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <span
+                    className="sub"
+                    style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                  >
+                    {day.completedSessions}/{day.scheduledSessions}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="row" style={{ gap: 18 }}>
+            <span className="sub">
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  background: "var(--accent)",
+                  marginRight: 6,
+                }}
+              />
+              Completed
+            </span>
+            <span className="sub">
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  background: "var(--accent-soft)",
+                  border: "1px solid var(--line)",
+                  marginRight: 6,
+                }}
+              />
+              Scheduled total
+            </span>
+          </div>
+
+          <Link className="text-link" href="/coach/assignments">
+            Review scheduled programs <ArrowRight size={16} aria-hidden />
+          </Link>
+        </section>
+
+        <section className="card stack" aria-labelledby="attention-title">
+          <div className="between">
+            <div className="stack tight">
+              <p className="eyebrow">CLIENT FOLLOW-UP</p>
+              <h2 id="attention-title">Clients needing attention</h2>
+              <p className="sub">
+                Approved clients with overdue assigned workouts.
+              </p>
+            </div>
+            <Clock3 size={23} aria-hidden />
+          </div>
+
+          {attentionClients.length === 0 ? (
+            <div className="empty-state">
+              <CalendarCheck2 size={26} aria-hidden />
+              <h3>No overdue assigned workouts</h3>
+              <p className="muted">
+                {metrics.activeAssignments === 0
+                  ? "Assign a published program to an approved client to start tracking adherence."
+                  : "There are currently no past-due, pending coached sessions that need follow-up."}
+              </p>
+              <Link className="btn secondary" href="/coach/assignments/new">
+                Assign a program
+              </Link>
+            </div>
+          ) : (
+            <div className="client-list">
+              {attentionClients.map((client) => (
+                <Link
+                  key={client.clientId}
+                  className="client-list-item"
+                  href={`/coach/clients/${encodeURIComponent(client.clientId)}`}
+                >
+                  <div className="profile-avatar" aria-hidden>
+                    {client.clientName.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="client-list-copy">
+                    <strong>{client.clientName}</strong>
+                    <span>{formatLastWorkout(client.lastCompletedWorkoutAt)}</span>
+                    <span>
+                      {client.overdueScheduledSessions} overdue scheduled
+                      {client.overdueScheduledSessions === 1
+                        ? " workout"
+                        : " workouts"}
+                    </span>
+                  </div>
+                  <ArrowRight size={17} aria-hidden />
+                </Link>
+              ))}
+            </div>
+          )}
+
+          <Link className="text-link" href="/coach/clients">
+            View client directory <ArrowRight size={16} aria-hidden />
+          </Link>
+        </section>
+      </div>
+
+      <div className="grid two">
+        <Link className="card stack" href="/coach/programs">
+          <ClipboardList size={23} aria-hidden />
+          <h3>Program library</h3>
+          <p className="sub">
+            Manage published training templates and reusable program versions.
+          </p>
+          <span className="text-link">
+            Open program library <ArrowRight size={16} aria-hidden />
+          </span>
+        </Link>
+
+        <Link className="card stack" href="/coach/assignments/new">
+          <Users size={23} aria-hidden />
+          <h3>Assign a program</h3>
+          <p className="sub">
+            Schedule a published training program for an approved client.
+          </p>
+          <span className="text-link">
+            Create assignment <ArrowRight size={16} aria-hidden />
+          </span>
+        </Link>
+      </div>
+
+      <p className="info-note">
+        Analytics are limited to your currently approved clients and active R3
+        assignments. Dates use UTC. Replaced and revoked assignments are not
+        included in these overview metrics.
+      </p>
+    </div>
+  );
+}
