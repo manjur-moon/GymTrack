@@ -10,3 +10,18 @@ playwright-report
 test-results
 .DS_Store
 *.log
+
+# Local AI agent skills
+.agents/
+
+# Local Claude skills
+.claude/skills/
+
+# Local Windsurf skills
+.windsurf/skills/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# Local AI skills lock
+skills-lock.json
