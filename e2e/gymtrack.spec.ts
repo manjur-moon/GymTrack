@@ -122,7 +122,7 @@ test("log a workout", async ({ page }) => {
 
   await expect(page.getByText("Exercise breakdown")).toBeVisible();
 
-  await expect(page.getByText("Working sets")).toBeVisible();
+  await expect(page.getByText("Working sets", { exact: true })).toBeVisible();
 
   // Verify navigation to workout history.
   await page
